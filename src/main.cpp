@@ -1,51 +1,93 @@
+#include <chrono>
 #include <cmath>
 #include <glad/gl.h>        
 #include <GLFW/glfw3.h>    
 #include <numbers>
 #include <vector>
 
+
 // define
+
+
+// made up 
+const float gravity = -0.25f;
+
+// floors
+const float floorY = -1.0f;
+
+// position
+struct pos {
+    float x;
+    float y;
+};
+
+// velocity
+struct velocity {
+    float x;
+    float y;
+};
+
+// body 
+struct body {
+    pos p;
+    velocity v;
+};
+
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-std::vector<float> circle_vertecies(int split);
+void circleVertecies(std::vector<float>& points, const pos& center, int split);
+float applyGravity(float currentVelocity, float dt);
+// make this more serious later
+void updateBodies(body& b, float dt);
 
 
-// triangle split
-std::vector<float> circle_vertecies(int split){
-    //array of points 
-    std::vector<float> points;
+// triangle split  // change to in place 
+void circleVertecies(std::vector<float>& points, const pos& center, int split){
+    // three vertecies (x,y) 3 * 2
+    const int pointsPerTriangle = 6; 
+    // could get a awful error if not
+    points.resize(pointsPerTriangle * split); 
 
     // angle split
     double delta = 2*std::numbers::pi/split;
 
-    // fill thetas first
-    std::vector<double> thetas(split + 1);
-    for(int i=0; i <= split ; i++){
-        thetas[i] = i * delta;
-    }
-    
-
-    // unit circle think
+    // change this later for fun implications on speed/velocity 
+    // can we add angular speed?
     float radian = 0.20f; 
 
-    for(int i=0; i <= split - 1; i++){
+    for(int i=0; i < split; ++i){
+        // offset
+        int base = pointsPerTriangle * i; 
 
         // 0
-        points.push_back(0.0f);
-        points.push_back(0.0f);
+        points[base + 0] = center.x;
+        points[base + 1] = center.y;
 
         // 1
-        points.push_back(std::cos(thetas[i]) * radian);
-        points.push_back(std::sin(thetas[i]) * radian);
+        points[base + 2] = (center.x + std::cos(i * delta) * radian);
+        points[base + 3] = (center.y + std::sin(i * delta) * radian);
 
         // 2
-        points.push_back(std::cos(thetas[i+1]) * radian);
-        points.push_back(std::sin(thetas[i+1]) * radian);
+        points[base + 4] = (center.x + std::cos((i+1) * delta) * radian);
+        points[base + 5] = (center.y + std::sin((i+1) * delta) * radian);
+
     }
-    return points;
+}
+// linear function for each step add g
+float applyGravity(float currentVelocity, float dt){
+    return currentVelocity + gravity * dt;
 }
 
+// update positions given velocity in x,y
+// only vertical vel for now
+void updateBodies(body& b, float dt){
+    b.p.y = b.p.y + b.v.y * dt;
 
+    if (b.p.y < floorY){
+        b.p.y = floorY;
+        b.v.y = 0;
+    }
+}
 
 int main() {
 
@@ -117,19 +159,20 @@ int main() {
     glDeleteShader(vs);
     glDeleteShader(fs);
 
-    // my actual pretty vertecies that will follow the spec above
-    float vertices[] = {
-        -0.25f, -0.25f,   // bottom-left
-         0.25f, -0.25f,   // bottom-right
-         0.25f,  0.25f,   // top-right
 
-        -0.25f, -0.25f,   // bottom-left
-         0.25f,  0.25f,   // top-right
-        -0.25f,  0.25f    // top-left
-    };
+    // set clock
+    auto startTime = std::chrono::steady_clock::now();
+    auto lastFrame = startTime;
 
     // my circle
-    std::vector<float> my_vs = circle_vertecies(20);
+    pos initPosition = {0.0f, 0.0f};
+    velocity v0 = {0.0f, 0.0f};
+    body circle = {
+        initPosition,
+        v0
+    };
+    std::vector<float> my_vs;
+    circleVertecies(my_vs, circle.p, 20);
 
     // no idea some storage
     GLuint vao, vbo;
@@ -145,8 +188,28 @@ int main() {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(0);
 
-    // --- 15. Main loop (time-stepped system)
     while (!glfwWindowShouldClose(window)) {
+
+        // time logic
+        auto now = std::chrono::steady_clock::now();
+        
+        auto elapsedTime = std::chrono::duration<float>(now - startTime).count();
+        auto deltaTime = std::chrono::duration<float>(now - lastFrame).count();
+        lastFrame = now;
+
+        // calculate gravity on our circle 
+        circle.v.y = applyGravity(circle.v.y, deltaTime);
+        updateBodies(circle, deltaTime);
+
+        // get new vertecies
+        circleVertecies(my_vs, circle.p, 20);
+
+        // expensive update 
+        // upload my vertecies to the gpu draw 
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, my_vs.size() * sizeof(float), my_vs.data(), GL_DYNAMIC_DRAW);
+
+
         // Clear the screen
         glClear(GL_COLOR_BUFFER_BIT);
 
